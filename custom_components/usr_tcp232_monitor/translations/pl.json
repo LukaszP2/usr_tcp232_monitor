@@ -1,0 +1,22 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "Monitor USR TCP232",
+        "description": "Podaj adres urządzenia oraz dane logowania do jego panelu WWW.",
+        "data": {
+          "host": "Adres IP lub nazwa hosta",
+          "username": "Nazwa użytkownika",
+          "password": "Hasło"
+        }
+      }
+    },
+    "error": {
+      "cannot_connect": "Nie można połączyć się z endpointami JSON urządzenia USR.",
+      "invalid_auth": "Nieprawidłowa nazwa użytkownika lub hasło albo nieobsługiwany mechanizm logowania."
+    },
+    "abort": {
+      "already_configured": "To urządzenie USR jest już skonfigurowane."
+    }
+  }
+}

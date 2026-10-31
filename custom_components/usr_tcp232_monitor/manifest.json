@@ -1,0 +1,13 @@
+{
+  "domain": "usr_tcp232_monitor",
+  "name": "USR TCP232 Monitor",
+  "codeowners": [
+    "@LukaszP2"
+  ],
+  "config_flow": true,
+  "documentation": "https://github.com/LukaszP2/usr_tcp232_monitor",
+  "iot_class": "local_polling",
+  "requirements": [],
+  "version": "0.4.0",
+  "issue_tracker": "https://github.com/LukaszP2/usr_tcp232_monitor/issues"
+}

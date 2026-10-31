@@ -1,0 +1,22 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "USR TCP232 Monitor",
+        "description": "Enter the device address and credentials for its web interface.",
+        "data": {
+          "host": "IP address or hostname",
+          "username": "Username",
+          "password": "Password"
+        }
+      }
+    },
+    "error": {
+      "cannot_connect": "Could not connect to the USR JSON endpoints.",
+      "invalid_auth": "Invalid username/password or unsupported authentication challenge."
+    },
+    "abort": {
+      "already_configured": "This USR device is already configured."
+    }
+  }
+}
