@@ -9,6 +9,23 @@
           "username": "Nazwa użytkownika",
           "password": "Hasło"
         }
+      },
+      "reauth_confirm": {
+        "title": "Ponowna autoryzacja USR TCP232",
+        "description": "Dane logowania do panelu WWW urządzenia {host} są nieprawidłowe. Zaktualizuj hasło.",
+        "data": {
+          "username": "Nazwa użytkownika",
+          "password": "Hasło"
+        }
+      },
+      "reconfigure": {
+        "title": "Rekonfiguracja USR TCP232",
+        "description": "Zmień adres sieciowy lub dane logowania dla urządzenia {host}.",
+        "data": {
+          "host": "Adres IP lub nazwa hosta",
+          "username": "Nazwa użytkownika",
+          "password": "Hasło"
+        }
       }
     },
     "error": {
@@ -16,7 +33,47 @@
       "invalid_auth": "Nieprawidłowa nazwa użytkownika lub hasło albo nieobsługiwany mechanizm logowania."
     },
     "abort": {
-      "already_configured": "To urządzenie USR jest już skonfigurowane."
+      "already_configured": "To urządzenie USR jest już skonfigurowane.",
+      "reauth_successful": "Ponowna autoryzacja powiodła się.",
+      "reauth_unsuccessful": "Nie udało się zrealizować ponownej autoryzacji.",
+      "reconfigure_successful": "Rekonfiguracja powiodła się.",
+      "reconfigure_unsuccessful": "Nie udało się zrealizować rekonfiguracji.",
+      "different_device": "Podany adres należy do innego urządzenia USR (niezgodny adres MAC)."
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "Opcje USR TCP232",
+        "description": "Skonfiguruj parametry odpytywania urządzenia.",
+        "data": {
+          "scan_interval": "Interwał odświeżania (w sekundach)"
+        }
+      }
+    }
+  },
+  "entity": {
+    "sensor": {
+      "firmware": { "name": "Wersja oprogramowania" },
+      "model": { "name": "Model" },
+      "hardware_type": { "name": "Typ sprzętu" },
+      "runtime": { "name": "Czas pracy" },
+      "ip_address": { "name": "Adres IP" },
+      "mac_address": { "name": "Adres MAC" },
+      "gateway": { "name": "Brama domyślna" },
+      "dns_primary": { "name": "Podstawowy DNS" },
+      "dns_secondary": { "name": "Zapasowy DNS" },
+      "port_a_status": { "name": "Status połączenia portu A" },
+      "port_b_status": { "name": "Status połączenia portu B" },
+      "tx_a": { "name": "Port A TX" },
+      "rx_a": { "name": "Port A RX" },
+      "tx_b": { "name": "Port B TX" },
+      "rx_b": { "name": "Port B RX" },
+      "mqtt_connection_status": { "name": "Status połączenia MQTT" }
+    },
+    "binary_sensor": {
+      "web_interface_reachable": { "name": "Panel WWW osiągalny" },
+      "mqtt_gateway_enabled": { "name": "Brama MQTT włączona" }
     }
   }
 }

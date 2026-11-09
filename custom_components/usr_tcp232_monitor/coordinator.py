@@ -1,7 +1,6 @@
 """Data coordinator for USR TCP232 diagnostic endpoints."""
 from __future__ import annotations
 
-import asyncio
 import hashlib
 import logging
 import re
@@ -11,12 +10,18 @@ from typing import Any
 from urllib.parse import urlsplit
 
 import aiohttp
-
 from homeassistant.const import CONF_HOST, CONF_PASSWORD, CONF_USERNAME
 from homeassistant.core import HomeAssistant
+from homeassistant.exceptions import ConfigEntryAuthFailed
+from homeassistant.helpers.aiohttp_client import async_get_clientsession
+from homeassistant.helpers.device_registry import (
+    CONNECTION_NETWORK_MAC,
+    DeviceInfo,
+    format_mac,
+)
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
 
-from .const import DEFAULT_SCAN_INTERVAL, DOMAIN
+from .const import CONF_SCAN_INTERVAL, DEFAULT_SCAN_INTERVAL, DOMAIN
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -29,7 +34,7 @@ def _bytes(value: Any) -> int | None:
     """Parse a byte counter such as '233226 bytes'."""
     if value is None:
         return None
-    match = re.search(r"-?\d+", str(value))
+    match = re.search(r"\d+", str(value))
     return int(match.group()) if match else None
 
 
@@ -65,7 +70,14 @@ def _quote_auth(value: str) -> str:
 class UsrCoordinator(DataUpdateCoordinator[dict[str, Any]]):
     """Fetch status and device identity from the USR web interface."""
 
-    def __init__(self, hass: HomeAssistant, config: dict[str, Any]) -> None:
+    mac: str = ""
+
+    def __init__(
+        self,
+        hass: HomeAssistant,
+        config: dict[str, Any],
+        options: dict[str, Any] | None = None,
+    ) -> None:
         self.host = config[CONF_HOST]
         self.base_url = f"http://{self.host}"
         self._username = config[CONF_USERNAME]
@@ -73,11 +85,39 @@ class UsrCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         self._auth_scheme: str | None = None
         self._digest_challenge: dict[str, str] | None = None
         self._nonce_count = 0
+        self.mac: str = ""
+        self._identity: dict[str, Any] = {}
+
+        options = options or {}
+        scan_interval = options.get(CONF_SCAN_INTERVAL, DEFAULT_SCAN_INTERVAL)
+
         super().__init__(
             hass,
             _LOGGER,
             name=DOMAIN,
-            update_interval=timedelta(seconds=DEFAULT_SCAN_INTERVAL),
+            update_interval=timedelta(seconds=scan_interval),
+        )
+
+    @property
+    def device_info(self) -> DeviceInfo:
+        """Return unified DeviceInfo for this USR device."""
+        identity = self._identity or (self.data.get("identity") if self.data else None) or {}
+        devicename = str(identity.get("devicename") or "USR TCP232")
+        model = str(identity.get("devicetype") or identity.get("devicename") or "TCP232-410S")
+        sw_version = str(identity.get("ver") or "")
+        mac = self.mac or (self.data.get("mac") if self.data else None)
+
+        identifiers = {(DOMAIN, mac)} if mac else {(DOMAIN, self.host)}
+        connections = {(CONNECTION_NETWORK_MAC, mac)} if mac else set()
+
+        return DeviceInfo(
+            identifiers=identifiers,
+            connections=connections,
+            name=devicename,
+            manufacturer="USR IOT",
+            model=model,
+            sw_version=sw_version,
+            configuration_url=f"http://{self.host}",
         )
 
     def _digest_header(self, method: str, url: str) -> str:
@@ -130,24 +170,34 @@ class UsrCoordinator(DataUpdateCoordinator[dict[str, Any]]):
 
     async def _request_json(
         self, session: aiohttp.ClientSession, endpoint: str
-    ) -> dict[str, Any]:
+    ) -> dict[str, Any] | None:
         """Request JSON, detecting the device's Basic or Digest auth challenge."""
         url = f"{self.base_url}/{endpoint}"
+        timeout = aiohttp.ClientTimeout(total=8)
         if self._auth_scheme == "basic":
             context = session.get(
-                url, auth=aiohttp.BasicAuth(self._username, self._password), allow_redirects=False
+                url,
+                auth=aiohttp.BasicAuth(self._username, self._password),
+                allow_redirects=False,
+                timeout=timeout,
             )
         elif self._auth_scheme == "digest":
             context = session.get(
-                url, headers={"Authorization": self._digest_header("GET", url)}, allow_redirects=False
+                url,
+                headers={"Authorization": self._digest_header("GET", url)},
+                allow_redirects=False,
+                timeout=timeout,
             )
         else:
-            context = session.get(url, allow_redirects=False)
+            context = session.get(url, allow_redirects=False, timeout=timeout)
 
         challenge_to_retry: tuple[str, dict[str, str]] | None = None
         async with context as response:
             if response.status == 401:
-                parsed = [_parse_auth_params(value) for value in response.headers.getall("WWW-Authenticate", [])]
+                parsed = [
+                    _parse_auth_params(value)
+                    for value in response.headers.getall("WWW-Authenticate", [])
+                ]
                 digest = next((params for scheme, params in parsed if scheme == "digest"), None)
                 basic = next((params for scheme, params in parsed if scheme == "basic"), None)
                 if digest is not None:
@@ -162,6 +212,8 @@ class UsrCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                     challenge_to_retry = ("basic", basic)
                 else:
                     raise UsrAuthError("USR returned an unsupported authentication challenge")
+            elif response.status == 404 and endpoint == "mqttbase.json":
+                return None
             else:
                 if 300 <= response.status < 400:
                     raise UpdateFailed(f"Unexpected redirect from {endpoint}")
@@ -180,16 +232,24 @@ class UsrCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 self._nonce_count = 0
                 auth_header = self._digest_header("GET", url)
                 retry_context = session.get(
-                    url, headers={"Authorization": auth_header}, allow_redirects=False
+                    url,
+                    headers={"Authorization": auth_header},
+                    allow_redirects=False,
+                    timeout=timeout,
                 )
             else:
                 self._auth_scheme = "basic"
                 retry_context = session.get(
-                    url, auth=aiohttp.BasicAuth(self._username, self._password), allow_redirects=False
+                    url,
+                    auth=aiohttp.BasicAuth(self._username, self._password),
+                    allow_redirects=False,
+                    timeout=timeout,
                 )
             async with retry_context as response:
                 if response.status in (401, 403):
                     raise UsrAuthError("USR rejected the supplied credentials")
+                if response.status == 404 and endpoint == "mqttbase.json":
+                    return None
                 if 300 <= response.status < 400:
                     raise UpdateFailed(f"Unexpected redirect from {endpoint}")
                 response.raise_for_status()
@@ -201,23 +261,53 @@ class UsrCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         raise UpdateFailed(f"Could not read USR TCP232 endpoint {endpoint}")
 
     async def _async_update_data(self) -> dict[str, Any]:
-        """Fetch endpoints sequentially with a properly closed HTTP session."""
+        """Fetch endpoints sequentially using Home Assistant's client session."""
+        session = async_get_clientsession(self.hass)
         endpoint = "temp_status.json"
         try:
-            timeout = aiohttp.ClientTimeout(total=8)
-            async with aiohttp.ClientSession(timeout=timeout) as session:
-                status = await self._request_json(session, endpoint)
+            status = await self._request_json(session, endpoint)
+            if not isinstance(status, dict):
+                raise UpdateFailed("temp_status.json did not return an object")
+
+            identity = self._identity or (self.data.get("identity") if self.data else None) or {}
+            if not identity:
                 endpoint = "define.json"
-                identity = await self._request_json(session, endpoint)
-                # This response may contain MQTT credentials. Only retain the enable flag.
-                endpoint = "mqttbase.json"
+                fetched_identity = await self._request_json(session, endpoint)
+                if isinstance(fetched_identity, dict) and fetched_identity:
+                    self._identity = fetched_identity
+                    identity = fetched_identity
+                elif isinstance(fetched_identity, dict):
+                    identity = fetched_identity
+                else:
+                    identity = {}
+
+            endpoint = "mqttbase.json"
+            mqtt_enabled = False
+            try:
                 mqtt = await self._request_json(session, endpoint)
-                mqtt_enabled = str(mqtt.get("mqtten", "")) == "1"
-                del mqtt
+                if isinstance(mqtt, dict) and str(mqtt.get("mqtten", "")) == "1":
+                    mqtt_enabled = True
+            except (aiohttp.ClientError, UpdateFailed):
+                mqtt_enabled = False
+
+            raw_mac = (
+                (identity or {}).get("usermac")
+                or (status or {}).get("usermac")
+                or ""
+            )
+            formatted_mac = ""
+            if raw_mac:
+                try:
+                    formatted_mac = format_mac(str(raw_mac))
+                except (ValueError, TypeError):
+                    formatted_mac = str(raw_mac).replace("-", ":").lower()
+            if formatted_mac:
+                self.mac = formatted_mac
 
             return {
                 "status": status,
                 "identity": identity,
+                "mac": self.mac,
                 "mqtt_enabled": mqtt_enabled,
                 "tx_a": _bytes(status.get("txcounta")),
                 "rx_a": _bytes(status.get("rxcounta")),
@@ -228,10 +318,29 @@ class UsrCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             _LOGGER.warning(
                 "USR TCP232 authentication failed (host=%s, endpoint=%s)", self.host, endpoint
             )
-            raise UpdateFailed("USR TCP232 authentication failed") from err
-        except (aiohttp.ClientError, asyncio.TimeoutError, ValueError, UpdateFailed) as err:
+            raise ConfigEntryAuthFailed(
+                f"USR TCP232 authentication failed for {self.host}"
+            ) from err
+        except (aiohttp.ClientError, TimeoutError, ValueError, UpdateFailed) as err:
             _LOGGER.warning(
                 "USR TCP232 request failed (host=%s, endpoint=%s, error=%s)",
-                self.host, endpoint, type(err).__name__
+                self.host,
+                endpoint,
+                type(err).__name__,
             )
             raise UpdateFailed(f"Could not read USR TCP232 endpoint {endpoint}") from err
+
+
+async def async_validate_connection(
+    hass: HomeAssistant, host: str, username: str, password: str
+) -> dict[str, Any]:
+    """Validate connection and credentials directly without scheduling updates."""
+    coordinator = UsrCoordinator(
+        hass,
+        {
+            CONF_HOST: host,
+            CONF_USERNAME: username,
+            CONF_PASSWORD: password,
+        },
+    )
+    return await coordinator._async_update_data()

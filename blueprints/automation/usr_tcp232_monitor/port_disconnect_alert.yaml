@@ -1,0 +1,133 @@
+blueprint:
+  name: "USR TCP232 — Utrata sesji TCP portu szeregowego"
+  description: >-
+    Wysyła powiadomienie na telefon, gdy port szeregowy (Port A lub Port B) traci
+    aktywne połączenie TCP (stan inny niż Connected przez określony czas), oraz
+    opcjonalnie informuje o wznowieniu połączenia.
+  domain: automation
+  homeassistant:
+    min_version: "2024.6.0"
+  input:
+    entities_section:
+      name: Sensor portu
+      icon: mdi:serial-port
+      description: Wybierz sensor monitorujący stan połączenia TCP portu szeregowego.
+      input:
+        port_status_sensor:
+          name: Sensor stanu portu
+          description: Sensor raportujący status połączenia TCP (np. sensor.usr_tcp232_*_port_a_status).
+          selector:
+            entity:
+              filter:
+                - integration: usr_tcp232_monitor
+                  domain: sensor
+    settings_section:
+      name: Ustawienia połączenia
+      icon: mdi:tune
+      description: Konfiguracja oczekiwanego stanu i progów czasowych.
+      input:
+        expected_state:
+          name: Oczekiwany stan połączenia
+          description: Stan oznaczający w pełni nawiązane połączenie TCP (domyślnie 'Connected').
+          default: "Connected"
+          selector:
+            text: {}
+        disconnect_duration:
+          name: Czas trwania rozłączenia
+          description: Jak długo port musi być rozłączony przed wyzwoleniem alertu (odfiltrowuje chwilowe renegocjacje połączeń).
+          default:
+            minutes: 2
+          selector:
+            duration: {}
+        notify_recovery:
+          name: Powiadomienie o ponownym połączeniu
+          description: Czy wysłać powiadomienie, gdy port powróci do stanu połączonego.
+          default: true
+          selector:
+            boolean: {}
+    notifications_section:
+      name: Powiadomienia i akcje
+      icon: mdi:bell-ring
+      description: Odbiorca powiadomień oraz opcjonalne dodatkowe akcje naprawcze.
+      input:
+        notify_device:
+          name: Urządzenie do powiadomień
+          description: Telefon lub tablet z aplikacją Home Assistant Companion.
+          selector:
+            device:
+              filter:
+                - integration: mobile_app
+        custom_actions:
+          name: Dodatkowe akcje przy rozłączeniu (opcjonalnie)
+          description: Własne akcje naprawcze (np. próba przeładowania integracji Modbus przez homeassistant.reload_config_entry).
+          default: []
+          selector:
+            action: {}
+        custom_recovery_actions:
+          name: Dodatkowe akcje przy ponownym połączeniu (opcjonalnie)
+          default: []
+          selector:
+            action: {}
+
+mode: restart
+
+trigger:
+  - trigger: state
+    entity_id: !input port_status_sensor
+    for: !input disconnect_duration
+    id: "check_disconnect"
+  - trigger: state
+    entity_id: !input port_status_sensor
+    to: !input expected_state
+    id: "reconnected"
+
+variables:
+  target_state: !input expected_state
+  recovery_enabled: !input notify_recovery
+
+condition:
+  - condition: template
+    value_template: >-
+      {{ trigger.to_state is not none
+         and trigger.to_state.state not in ['unavailable', 'unknown'] }}
+
+action:
+  - choose:
+      - conditions:
+          - condition: trigger
+            id: "check_disconnect"
+          - condition: template
+            value_template: "{{ trigger.to_state.state != target_state }}"
+        sequence:
+          - alias: "Wyślij alert o rozłączeniu portu"
+            domain: mobile_app
+            type: notify
+            device_id: !input notify_device
+            title: "⚠️ USR-TCP232: Rozłączenie portu szeregowego"
+            message: >-
+              Port szeregowy {{ trigger.to_state.name }} zmienił stan na '{{ trigger.to_state.state }}' (oczekiwany: '{{ target_state }}'). Połączenie z klientem TCP zostało przerwane.
+            data:
+              tag: "usr-port-disconnect-{{ trigger.entity_id }}"
+              notification_icon: "mdi:serial-port"
+          - sequence: !input custom_actions
+
+      - conditions:
+          - condition: trigger
+            id: "reconnected"
+          - condition: template
+            value_template: >-
+              {{ recovery_enabled
+                 and trigger.from_state is not none
+                 and trigger.from_state.state != target_state }}
+        sequence:
+          - alias: "Wyślij powiadomienie o wznowieniu połączenia"
+            domain: mobile_app
+            type: notify
+            device_id: !input notify_device
+            title: "✅ USR-TCP232: Port szeregowy połączony"
+            message: >-
+              Port szeregowy {{ trigger.to_state.name }} powrócił do stanu '{{ target_state }}'.
+            data:
+              tag: "usr-port-disconnect-{{ trigger.entity_id }}"
+              notification_icon: "mdi:serial-port"
+          - sequence: !input custom_recovery_actions

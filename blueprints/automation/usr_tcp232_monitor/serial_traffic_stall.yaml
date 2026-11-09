@@ -1,0 +1,135 @@
+blueprint:
+  name: "USR TCP232 — Wykrycie braku transmisji na magistrali szeregowej"
+  description: >-
+    Wykrywa zamrożenie transmisji danych na porcie szeregowym (brak przyrostu licznika
+    odebranych lub wysłanych bajtów TX/RX przez zadany czas), z możliwością ograniczenia
+    kontroli do określonych godzin (np. czasu pracy falownika fotowoltaicznego).
+  domain: automation
+  homeassistant:
+    min_version: "2024.6.0"
+  input:
+    entities_section:
+      name: Sensor licznika bajtów
+      icon: mdi:counter
+      description: Wybierz sensor zliczający bajty na monitorowanym porcie szeregowym.
+      input:
+        counter_sensor:
+          name: Licznik bajtów magistrali (TX lub RX)
+          description: Sensor licznikowy transferu (np. sensor.usr_tcp232_*_rx_a lub sensor.usr_tcp232_*_tx_a).
+          selector:
+            entity:
+              filter:
+                - integration: usr_tcp232_monitor
+                  domain: sensor
+                  device_class: data_size
+    thresholds_section:
+      name: Czas braku transmisji
+      icon: mdi:timer-sand
+      description: Określ, po jakim czasie braku nowych danych ma zostać wywołany alert.
+      input:
+        stall_duration_minutes:
+          name: Maksymalny czas bez zmiany licznika (minuty)
+          description: Jeśli przez ten czas licznik bajtów nie zmieni wartości, zostanie zgłoszony alert.
+          default: 30
+          selector:
+            number:
+              min: 5
+              max: 1440
+              step: 5
+              unit_of_measurement: "min"
+              mode: box
+    schedule_section:
+      name: Ograniczenie godzinowe (opcjonalnie)
+      icon: mdi:clock-time-four-outline
+      description: Filtrowanie godzinowe dla urządzeń niepracujących w nocy (np. falowniki PV).
+      input:
+        enable_time_filter:
+          name: Włącz ograniczenie do przedziału godzin
+          description: Aktywuj, aby sprawdzać brak transmisji wyłącznie w zadanym oknie czasowym.
+          default: false
+          selector:
+            boolean: {}
+        start_time:
+          name: Godzina rozpoczęcia kontroli
+          description: Początek okna monitorowania (np. 06:00:00).
+          default: "06:00:00"
+          selector:
+            time: {}
+        end_time:
+          name: Godzina zakończenia kontroli
+          description: Koniec okna monitorowania (np. 22:00:00).
+          default: "22:00:00"
+          selector:
+            time: {}
+    notifications_section:
+      name: Powiadomienia i akcje
+      icon: mdi:bell-ring
+      description: Odbiorca powiadomień oraz dodatkowe akcje.
+      input:
+        notify_device:
+          name: Urządzenie do powiadomień
+          description: Telefon lub tablet z aplikacją Home Assistant Companion.
+          selector:
+            device:
+              filter:
+                - integration: mobile_app
+        custom_actions:
+          name: Dodatkowe akcje (opcjonalnie)
+          description: Własne akcje (np. powiadomienie Telegram, próba przeładowania integracji Modbus).
+          default: []
+          selector:
+            action: {}
+
+mode: single
+max_exceeded: silent
+
+trigger:
+  - trigger: time_pattern
+    minutes: "/5"
+
+variables:
+  sensor: !input counter_sensor
+  stall_min: !input stall_duration_minutes
+  time_filter: !input enable_time_filter
+  t_start: !input start_time
+  t_end: !input end_time
+
+condition:
+  - condition: template
+    value_template: >-
+      {{ states[sensor] is defined
+         and states[sensor].state not in ['unavailable', 'unknown'] }}
+  - condition: template
+    value_template: >-
+      {% if time_filter %}
+        {% set current_time = now().strftime('%H:%M:%S') %}
+        {{ t_start <= current_time <= t_end }}
+      {% else %}
+        true
+      {% endif %}
+  - condition: template
+    value_template: >-
+      {% set last_changed_ts = as_timestamp(states[sensor].last_changed, 0) %}
+      {% set stall_seconds = (stall_min | int(30)) * 60 %}
+      {{ (as_timestamp(now()) - last_changed_ts) >= stall_seconds }}
+  - condition: template
+    value_template: >-
+      {% if this.attributes.last_triggered is defined and this.attributes.last_triggered is not none %}
+        {% set stall_seconds = (stall_min | int(30)) * 60 %}
+        {{ (as_timestamp(now()) - as_timestamp(this.attributes.last_triggered)) >= stall_seconds }}
+      {% else %}
+        true
+      {% endif %}
+
+action:
+  - alias: "Wyślij alert o braku transmisji na magistrali"
+    domain: mobile_app
+    type: notify
+    device_id: !input notify_device
+    title: "⚠️ USR-TCP232: Brak transmisji na magistrali"
+    message: >-
+      Licznik transmisji {{ state_attr(sensor, 'friendly_name') or sensor }} nie zmienił wartości od ponad {{ stall_min }} minut. Aktualny stan: {{ states(sensor) }} B. Może to oznaczać zawieszenie magistrali RS485/RS232 lub odłączenie urządzenia końcowego.
+    data:
+      tag: "usr-stall-{{ sensor }}"
+      notification_icon: "mdi:timer-sand-empty"
+  - sequence: !input custom_actions

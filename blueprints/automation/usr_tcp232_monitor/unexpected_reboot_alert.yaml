@@ -1,0 +1,110 @@
+blueprint:
+  name: "USR TCP232 — Wykrycie restartu konwertera"
+  description: >-
+    Powiadamia o nagłym zresetowaniu konwertera USR-TCP232 (spadek czasu pracy poniżej
+    ustalonego progu po wcześniejszej ciągłej pracy), pomagając wykryć zaniki zasilania,
+    spadki napięcia lub zadziałanie watchdoga.
+  domain: automation
+  homeassistant:
+    min_version: "2024.6.0"
+  input:
+    entities_section:
+      name: Sensor czasu pracy
+      icon: mdi:clock-start
+      description: Wybierz sensor czasu pracy konwertera.
+      input:
+        runtime_sensor:
+          name: Sensor czasu pracy (Runtime)
+          description: Sensor raportujący czas pracy w sekundach (np. sensor.usr_tcp232_*_runtime).
+          selector:
+            entity:
+              filter:
+                - integration: usr_tcp232_monitor
+                  domain: sensor
+                  device_class: duration
+    thresholds_section:
+      name: Progi detekcji restartu
+      icon: mdi:timer-alert-outline
+      description: Parametry decydujące o zakwalifikowaniu zmiany jako restart.
+      input:
+        threshold_seconds:
+          name: Maksymalny czas od restartu (sekundy)
+          description: Alert zostanie wyzwolony, gdy czas pracy spadnie poniżej tej wartości (domyślnie 300 s = 5 min).
+          default: 300
+          selector:
+            number:
+              min: 30
+              max: 3600
+              step: 10
+              unit_of_measurement: "s"
+              mode: box
+        min_previous_runtime:
+          name: Minimalny poprzedni czas pracy (sekundy)
+          description: Ignoruj restart, jeśli przed zmianą konwerter pracował krócej niż ten czas (zapobiega lawinie powiadomień podczas wielokrotnych restartów serwisowych).
+          default: 600
+          selector:
+            number:
+              min: 60
+              max: 86400
+              step: 60
+              unit_of_measurement: "s"
+              mode: box
+    notifications_section:
+      name: Powiadomienia i akcje
+      icon: mdi:bell-ring
+      description: Odbiorca powiadomień oraz ewentualne dodatkowe akcje.
+      input:
+        notify_device:
+          name: Urządzenie do powiadomień
+          description: Telefon lub tablet z aplikacją Home Assistant Companion.
+          selector:
+            device:
+              filter:
+                - integration: mobile_app
+        custom_actions:
+          name: Dodatkowe akcje (opcjonalnie)
+          description: Własne akcje wykonywane przy wykryciu restartu (np. wpis do dziennika, powiadomienie e-mail).
+          default: []
+          selector:
+            action: {}
+
+mode: single
+max_exceeded: silent
+
+trigger:
+  - trigger: numeric_state
+    entity_id: !input runtime_sensor
+    below: !input threshold_seconds
+
+variables:
+  min_previous: !input min_previous_runtime
+
+condition:
+  - condition: template
+    value_template: >-
+      {{ trigger.from_state is not none
+         and trigger.from_state.state not in ['unavailable', 'unknown']
+         and trigger.to_state is not none
+         and trigger.to_state.state not in ['unavailable', 'unknown']
+         and (trigger.from_state.state | float(0)) >= (min_previous | float(0))
+         and (trigger.from_state.state | float(0)) > (trigger.to_state.state | float(0)) }}
+
+action:
+  - alias: "Wyślij alert o zresetowaniu konwertera"
+    domain: mobile_app
+    type: notify
+    device_id: !input notify_device
+    title: "⚡ USR-TCP232: Wykryto restart konwertera"
+    message: >-
+      {% set prev_s = trigger.from_state.state | int(0) %}
+      {% set curr_s = trigger.to_state.state | int(0) %}
+      {% set prev_d = prev_s // 86400 %}
+      {% set prev_h = (prev_s % 86400) // 3600 %}
+      {% set prev_m = (prev_s % 3600) // 60 %}
+      Konwerter {{ trigger.to_state.name }} został zrestartowany.
+      Poprzedni czas pracy: {{ prev_d }}d {{ prev_h }}h {{ prev_m }}m.
+      Bieżący czas od uruchomienia: {{ curr_s // 60 }} min {{ curr_s % 60 }} s.
+    data:
+      tag: "usr-reboot-{{ trigger.entity_id }}"
+      notification_icon: "mdi:restart-alert"
+  - sequence: !input custom_actions

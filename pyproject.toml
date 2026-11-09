@@ -1,0 +1,12 @@
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+asyncio_mode = "auto"
+pythonpath = [
+    "/home/ubuntu/iot/ha_config/.local/lib/python3.12/site-packages",
+    "."
+]
+
+[tool.pyright]
+extraPaths = [
+    "/home/ubuntu/iot/ha_config/.local/lib/python3.12/site-packages"
+]

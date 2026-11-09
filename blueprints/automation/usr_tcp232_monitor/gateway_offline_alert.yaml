@@ -1,0 +1,125 @@
+blueprint:
+  name: "USR TCP232 — Alert o utracie łączności z konwerterem"
+  description: >-
+    Wysyła powiadomienie na telefon, gdy konwerter USR-TCP232 przestaje odpowiadać
+    w sieci lokalnej przez określony czas, oraz opcjonalnie informuje o przywróceniu
+    połączenia.
+  domain: automation
+  homeassistant:
+    min_version: "2024.6.0"
+  input:
+    entities_section:
+      name: Sensor łączności
+      icon: mdi:lan-disconnect
+      description: Wybierz sensor sprawdzający dostępność panelu WWW konwertera.
+      input:
+        connectivity_sensor:
+          name: Sensor osiągalności konwertera
+          description: Główny sensor łączności HTTP (np. binary_sensor.usr_tcp232_*_web_interface_reachable).
+          selector:
+            entity:
+              filter:
+                - integration: usr_tcp232_monitor
+                  domain: binary_sensor
+                  device_class: connectivity
+    timing_section:
+      name: Czasy i opóźnienia
+      icon: mdi:timer-outline
+      description: Ustawienia opóźnienia alertu oraz powiadomień powrotnych.
+      input:
+        offline_duration:
+          name: Czas trwania braku łączności
+          description: Jak długo konwerter musi być niedostępny przed wyzwoleniem alertu (odfiltrowuje chwilowe restarty routera lub switcha).
+          default:
+            minutes: 2
+          selector:
+            duration: {}
+        notify_recovery:
+          name: Powiadomienie o przywróceniu łączności
+          description: Czy wysłać powiadomienie, gdy łączność z konwerterem zostanie przywrócona.
+          default: true
+          selector:
+            boolean: {}
+    notifications_section:
+      name: Powiadomienia i akcje
+      icon: mdi:bell-ring
+      description: Odbiorca powiadomień oraz opcjonalne dodatkowe akcje.
+      input:
+        notify_device:
+          name: Urządzenie do powiadomień
+          description: Telefon lub tablet z zainstalowaną aplikacją Home Assistant Companion.
+          selector:
+            device:
+              filter:
+                - integration: mobile_app
+        custom_actions:
+          name: Dodatkowe akcje przy awarii (opcjonalnie)
+          description: Akcje wykonywane w momencie wykrycia braku łączności (np. powiadomienie Telegram, zapalenie lampki).
+          default: []
+          selector:
+            action: {}
+        custom_recovery_actions:
+          name: Dodatkowe akcje przy przywróceniu łączności (opcjonalnie)
+          description: Akcje wykonywane, gdy konwerter ponownie stanie się dostępny.
+          default: []
+          selector:
+            action: {}
+
+mode: restart
+
+trigger:
+  - trigger: state
+    entity_id: !input connectivity_sensor
+    to: "off"
+    for: !input offline_duration
+    id: "offline"
+  - trigger: state
+    entity_id: !input connectivity_sensor
+    from: "off"
+    to: "on"
+    id: "online"
+
+variables:
+  recovery_enabled: !input notify_recovery
+
+condition:
+  - condition: template
+    value_template: >-
+      {{ trigger.to_state is not none
+         and trigger.to_state.state not in ['unavailable', 'unknown'] }}
+
+action:
+  - choose:
+      - conditions:
+          - condition: trigger
+            id: "offline"
+        sequence:
+          - alias: "Wyślij alert o braku łączności"
+            domain: mobile_app
+            type: notify
+            device_id: !input notify_device
+            title: "🚨 USR-TCP232: Brak łączności z bramką"
+            message: >-
+              Konwerter {{ trigger.to_state.name }} nie odpowiada w sieci lokalnej od dłuższego czasu.
+            data:
+              tag: "usr-offline-{{ trigger.entity_id }}"
+              notification_icon: "mdi:lan-disconnect"
+          - sequence: !input custom_actions
+
+      - conditions:
+          - condition: trigger
+            id: "online"
+          - condition: template
+            value_template: "{{ recovery_enabled }}"
+        sequence:
+          - alias: "Wyślij powiadomienie o przywróceniu łączności"
+            domain: mobile_app
+            type: notify
+            device_id: !input notify_device
+            title: "✅ USR-TCP232: Łączność przywrócona"
+            message: >-
+              Konwerter {{ trigger.to_state.name }} ponownie odpowiada w sieci lokalnej.
+            data:
+              tag: "usr-offline-{{ trigger.entity_id }}"
+              notification_icon: "mdi:lan-connect"
+          - sequence: !input custom_recovery_actions

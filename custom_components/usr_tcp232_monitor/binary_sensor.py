@@ -1,10 +1,14 @@
-
 """Binary sensors for USR TCP232 Monitor."""
 from __future__ import annotations
 
-from homeassistant.components.binary_sensor import BinarySensorEntity
+from homeassistant.components.binary_sensor import (
+    BinarySensorDeviceClass,
+    BinarySensorEntity,
+)
+from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import EntityCategory
-from homeassistant.helpers.device_registry import DeviceInfo
+from homeassistant.core import HomeAssistant
+from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
 from .const import DOMAIN
@@ -12,63 +16,63 @@ from .coordinator import UsrCoordinator
 
 
 class UsrOnlineBinarySensor(CoordinatorEntity[UsrCoordinator], BinarySensorEntity):
-    _attr_has_entity_name = True
-    _attr_name = "Web interface reachable"
-    _attr_device_class = "connectivity"
-    _attr_entity_category = EntityCategory.DIAGNOSTIC
+    """Connectivity binary sensor representing web interface reachability."""
 
-    def __init__(self, coordinator: UsrCoordinator):
+    _attr_has_entity_name = True
+    _attr_device_class = BinarySensorDeviceClass.CONNECTIVITY
+    _attr_translation_key = "web_interface_reachable"
+
+    def __init__(self, coordinator: UsrCoordinator) -> None:
         super().__init__(coordinator)
-        self._attr_unique_id = f"{coordinator.host}_web_interface_reachable"
-        self._attr_device_info = DeviceInfo(
-            identifiers={(DOMAIN, coordinator.host)},
-            name="USR TCP232",
-            manufacturer="USR IOT",
-            model="TCP232 serial-to-Ethernet gateway",
-            configuration_url=f"http://{coordinator.host}",
-        )
+        prefix = coordinator.mac or coordinator.host
+        self._attr_unique_id = f"{prefix}_web_interface_reachable"
+        self._attr_device_info = coordinator.device_info
 
     @property
     def is_on(self) -> bool:
+        """Return true if coordinator successfully fetched data."""
         return self.coordinator.last_update_success
 
     @property
     def available(self) -> bool:
+        """Keep binary sensor available so disconnected state is visible."""
         return True
-
-
-async def async_setup_entry(hass, entry, async_add_entities):
-    coordinator = hass.data[DOMAIN][entry.entry_id]
-    async_add_entities([
-        UsrOnlineBinarySensor(coordinator),
-        UsrMqttEnabledBinarySensor(coordinator),
-    ])
 
 
 class UsrMqttEnabledBinarySensor(CoordinatorEntity[UsrCoordinator], BinarySensorEntity):
     """Whether MQTT gateway is enabled in the USR configuration."""
 
     _attr_has_entity_name = True
-    _attr_name = "MQTT gateway enabled"
     _attr_entity_category = EntityCategory.DIAGNOSTIC
+    _attr_translation_key = "mqtt_gateway_enabled"
 
-    def __init__(self, coordinator: UsrCoordinator):
+    def __init__(self, coordinator: UsrCoordinator) -> None:
         super().__init__(coordinator)
-        self._attr_unique_id = f"{coordinator.host}_mqtt_gateway_enabled"
-        self._attr_device_info = DeviceInfo(
-            identifiers={(DOMAIN, coordinator.host)},
-            name="USR TCP232",
-            manufacturer="USR IOT",
-            model="TCP232 serial-to-Ethernet gateway",
-            configuration_url=f"http://{coordinator.host}",
-        )
+        prefix = coordinator.mac or coordinator.host
+        self._attr_unique_id = f"{prefix}_mqtt_gateway_enabled"
+        self._attr_device_info = coordinator.device_info
 
     @property
     def is_on(self) -> bool:
+        """Return true if MQTT is enabled."""
+        if not self.coordinator.data:
+            return False
         return bool(self.coordinator.data.get("mqtt_enabled", False))
 
     @property
     def available(self) -> bool:
+        """Return true if coordinator update was successful."""
         return self.coordinator.last_update_success
 
 
+async def async_setup_entry(
+    hass: HomeAssistant,
+    entry: ConfigEntry,
+    async_add_entities: AddEntitiesCallback,
+) -> None:
+    """Set up binary sensors from config entry."""
+    coordinator: UsrCoordinator = getattr(entry, "runtime_data", None) or hass.data[DOMAIN][entry.entry_id]
+    async_add_entities([
+        UsrOnlineBinarySensor(coordinator),
+        UsrMqttEnabledBinarySensor(coordinator),
+    ])

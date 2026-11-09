@@ -9,6 +9,23 @@
           "username": "Username",
           "password": "Password"
         }
+      },
+      "reauth_confirm": {
+        "title": "Reauthenticate USR TCP232",
+        "description": "The web interface credentials for {host} are invalid. Please update the password.",
+        "data": {
+          "username": "Username",
+          "password": "Password"
+        }
+      },
+      "reconfigure": {
+        "title": "Reconfigure USR TCP232",
+        "description": "Update connection settings or credentials for {host}.",
+        "data": {
+          "host": "IP address or hostname",
+          "username": "Username",
+          "password": "Password"
+        }
       }
     },
     "error": {
@@ -16,7 +33,47 @@
       "invalid_auth": "Invalid username/password or unsupported authentication challenge."
     },
     "abort": {
-      "already_configured": "This USR device is already configured."
+      "already_configured": "This USR device is already configured.",
+      "reauth_successful": "Reauthentication successful.",
+      "reauth_unsuccessful": "Reauthentication failed. Entry could not be loaded.",
+      "reconfigure_successful": "Reconfiguration successful.",
+      "reconfigure_unsuccessful": "Reconfiguration failed. Entry could not be loaded.",
+      "different_device": "The entered address belongs to a different USR device (MAC address mismatch)."
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "USR TCP232 Options",
+        "description": "Configure polling options.",
+        "data": {
+          "scan_interval": "Update interval (seconds)"
+        }
+      }
+    }
+  },
+  "entity": {
+    "sensor": {
+      "firmware": { "name": "Firmware" },
+      "model": { "name": "Model" },
+      "hardware_type": { "name": "Hardware type" },
+      "runtime": { "name": "Runtime" },
+      "ip_address": { "name": "IP address" },
+      "mac_address": { "name": "MAC address" },
+      "gateway": { "name": "Default gateway" },
+      "dns_primary": { "name": "Primary DNS" },
+      "dns_secondary": { "name": "Secondary DNS" },
+      "port_a_status": { "name": "Port A connection" },
+      "port_b_status": { "name": "Port B connection" },
+      "tx_a": { "name": "Port A TX" },
+      "rx_a": { "name": "Port A RX" },
+      "tx_b": { "name": "Port B TX" },
+      "rx_b": { "name": "Port B RX" },
+      "mqtt_connection_status": { "name": "MQTT connection status" }
+    },
+    "binary_sensor": {
+      "web_interface_reachable": { "name": "Web interface reachable" },
+      "mqtt_gateway_enabled": { "name": "MQTT gateway enabled" }
     }
   }
 }

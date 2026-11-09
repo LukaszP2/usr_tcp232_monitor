@@ -1,0 +1,144 @@
+blueprint:
+  name: "USR TCP232 — Automatyczny restart zasilania przy zawieszeniu"
+  description: >-
+    Automatycznie wykonuje cykl zasilania (wyłączenie i ponowne włączenie smart gniazdka
+    lub przekaźnika), gdy konwerter jest niedostępny przez zadany czas, z zabezpieczeniem
+    przed pętlą restartów.
+  domain: automation
+  homeassistant:
+    min_version: "2024.6.0"
+  input:
+    entities_section:
+      name: Konwerter i zasilanie
+      icon: mdi:power-cycle
+      description: Wybierz sensor łączności konwertera oraz sterownik zasilania.
+      input:
+        connectivity_sensor:
+          name: Sensor osiągalności konwertera
+          description: Główny sensor łączności HTTP (np. binary_sensor.usr_tcp232_*_web_interface_reachable).
+          selector:
+            entity:
+              filter:
+                - integration: usr_tcp232_monitor
+                  domain: binary_sensor
+                  device_class: connectivity
+        power_switch:
+          name: Przełącznik zasilania (Smart Plug / Przekaźnik)
+          description: Urządzenie lub encja zasilająca konwerter (np. gniazdko Zigbee, Shelly, Sonoff).
+          selector:
+            target:
+              entity:
+                - domain:
+                    - switch
+                    - light
+    timings_section:
+      name: Czasy i zabezpieczenia
+      icon: mdi:shield-clock-outline
+      description: Konfiguracja opóźnień oraz ochrony przed zapętleniem restartów.
+      input:
+        offline_delay:
+          name: Czas braku łączności przed restartem
+          description: Jak długo konwerter musi być offline przed podjęciem próby twardego resetu zasilania.
+          default:
+            minutes: 5
+          selector:
+            duration: {}
+        power_off_duration:
+          name: Czas trwania odcięcia zasilania (sekundy)
+          description: Na ile sekund odciąć zasilanie przed ponownym włączeniem (aby rozładować kondensatory w zasilaczu).
+          default: 10
+          selector:
+            number:
+              min: 3
+              max: 60
+              step: 1
+              unit_of_measurement: "s"
+              mode: box
+        cooldown_hours:
+          name: Ochrona przed pętlą restartów (godziny)
+          description: Minimalny czas, jaki musi upłynąć od poprzedniego restartu (zapobiega ciągłym restartom w przypadku trwałej awarii, np. odpiętego kabla sieciowego).
+          default: 6
+          selector:
+            number:
+              min: 1
+              max: 48
+              step: 1
+              unit_of_measurement: "h"
+              mode: box
+    notifications_section:
+      name: Powiadomienia i akcje
+      icon: mdi:bell-ring
+      description: Opcjonalne powiadomienie oraz dodatkowe czynności.
+      input:
+        notify_device:
+          name: Urządzenie do powiadomień (opcjonalnie)
+          description: Telefon lub tablet z aplikacją Home Assistant Companion.
+          default: ""
+          selector:
+            device:
+              filter:
+                - integration: mobile_app
+        custom_actions:
+          name: Dodatkowe akcje (opcjonalnie)
+          description: Własne akcje wykonywane po wykonaniu cyklu zasilania.
+          default: []
+          selector:
+            action: {}
+
+mode: single
+max_exceeded: silent
+
+trigger:
+  - trigger: state
+    entity_id: !input connectivity_sensor
+    to: "off"
+    for: !input offline_delay
+
+variables:
+  cooldown_h: !input cooldown_hours
+  notify_dev: !input notify_device
+  off_seconds: !input power_off_duration
+
+condition:
+  - condition: template
+    value_template: >-
+      {{ trigger.to_state is not none and trigger.to_state.state == 'off' }}
+  - condition: template
+    value_template: >-
+      {% if this.attributes.last_triggered is defined and this.attributes.last_triggered is not none %}
+        {% set cooldown_s = (cooldown_h | int(6)) * 3600 %}
+        {{ (as_timestamp(now()) - as_timestamp(this.attributes.last_triggered)) >= cooldown_s }}
+      {% else %}
+        true
+      {% endif %}
+
+action:
+  - alias: "Odłącz zasilanie konwertera"
+    service: homeassistant.turn_off
+    target: !input power_switch
+
+  - alias: "Odczekaj na rozładowanie kondensatorów"
+    delay:
+      seconds: "{{ off_seconds | int(10) }}"
+
+  - alias: "Włącz zasilanie konwertera"
+    service: homeassistant.turn_on
+    target: !input power_switch
+
+  - choose:
+      - conditions:
+          - condition: template
+            value_template: "{{ notify_dev != '' }}"
+        sequence:
+          - alias: "Powiadom o wykonaniu twardego restartu"
+            domain: mobile_app
+            type: notify
+            device_id: !input notify_device
+            title: "🔌 USR-TCP232: Wykonano awaryjny cykl zasilania"
+            message: >-
+              Konwerter {{ trigger.to_state.name }} był nieosiągalny. Zasilanie zostało odłączone na {{ off_seconds }} s i włączone ponownie w celu automatycznego przywrócenia pracy.
+            data:
+              tag: "usr-power-cycle-{{ trigger.entity_id }}"
+              notification_icon: "mdi:power-cycle"
+
+  - sequence: !input custom_actions
