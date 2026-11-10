@@ -9,6 +9,6 @@
   "integration_type": "device",
   "iot_class": "local_polling",
   "requirements": [],
-  "version": "0.4.0",
+  "version": "0.5.0",
   "issue_tracker": "https://github.com/LukaszP2/usr_tcp232_monitor/issues"
 }
