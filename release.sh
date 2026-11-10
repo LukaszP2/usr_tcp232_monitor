@@ -10,6 +10,13 @@ fi
 NEW_VER="$1"
 MSG="${2:-Wydanie v${NEW_VER}}"
 REPO_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
+# Sprawdzenie czystości repozytorium
+if ! git -C "${REPO_DIR}" diff-index --quiet HEAD --; then
+    echo "BŁĄD: Repozytorium zawiera niezatwierdzone zmiany! Zatwierdź je przed wydaniem."
+    exit 1
+fi
+
 MANIFEST="${REPO_DIR}/custom_components/usr_tcp232_monitor/manifest.json"
 
 python3 -c "
@@ -23,7 +30,7 @@ with open('${MANIFEST}', 'r+') as f:
     f.truncate()
 "
 
-git -C "${REPO_DIR}" add .
+git -C "${REPO_DIR}" add "${MANIFEST}"
 git -C "${REPO_DIR}" commit -m "Bump version to ${NEW_VER}: ${MSG}" || true
 git -C "${REPO_DIR}" tag -a "v${NEW_VER}" -m "${MSG}"
 git -C "${REPO_DIR}" push origin HEAD --follow-tags
