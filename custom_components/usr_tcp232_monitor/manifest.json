@@ -8,7 +8,7 @@
   "documentation": "https://github.com/LukaszP2/usr_tcp232_monitor",
   "integration_type": "device",
   "iot_class": "local_polling",
+  "issue_tracker": "https://github.com/LukaszP2/usr_tcp232_monitor/issues",
   "requirements": [],
-  "version": "0.5.0",
-  "issue_tracker": "https://github.com/LukaszP2/usr_tcp232_monitor/issues"
+  "version": "0.5.0"
 }

@@ -24,8 +24,11 @@ import json
 with open('${MANIFEST}', 'r+') as f:
     d = json.load(f)
     d['version'] = '${NEW_VER}'
+    first = {k: d[k] for k in ('domain', 'name') if k in d}
+    rest = {k: d[k] for k in sorted(d.keys()) if k not in ('domain', 'name')}
+    ordered = {**first, **rest}
     f.seek(0)
-    json.dump(d, f, indent=2, ensure_ascii=False)
+    json.dump(ordered, f, indent=2, ensure_ascii=False)
     f.write('\n')
     f.truncate()
 "
